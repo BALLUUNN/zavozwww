@@ -231,8 +231,7 @@ graph TB
     Redis[Redis]
     %% Внешние сервисы
     TMDB[TMDB API]
-    EMAIL[Email Service]
-    PUSH[Push Notification Service]
+
     
     %% Соединения
     WEB --> GW
@@ -252,8 +251,7 @@ graph TB
     NOTIFY --> NOTIFY_DB
     
     MOVIE --> TMDB
-    NOTIFY --> EMAIL
-    NOTIFY --> PUSH
+
     
     REC --> USER
     REC --> MOVIE
