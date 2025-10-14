@@ -31,18 +31,6 @@
 | **Аутентификация** | Процесс проверки подлинности пользователя при входе в систему |
 | **Система рекомендаций** | Алгоритм, который на основе пользовательских оценок выдает персональные рекомендации |
 
----
-
-# 🎬 Система рекомендаций фильмов
-
-## 📋 Содержание
-1. [Регистрация и аутентификация](#1-регистрация-и-аутентификация-пользователей)
-2. [Управление профилем](#2-управление-профилем-пользователя)
-3. [Поиск друзей](#3-поиск-и-добавление-в-друзья)
-4. [Поиск фильмов](#4-поиск-фильмов)
-5. [Просмотр фильмов](#5-просмотр-информации-о-фильме)
-6. [Оценки фильмов](#6-выставление-оценок-фильмам)
-7. [Рекомендации](#7-получение-персональных-рекомендаций)
 
 ---
 
@@ -224,9 +212,9 @@
 ---
 ## Архитектура системыы
 
-# 🎬 Архитектура системы рекомендаций фильмов
+# Архитектура системы рекомендаций фильмов
 
-## 📊 Общая схема архитектуры
+## Общая схема архитектуры
 
 ```mermaid
 graph TB
@@ -396,30 +384,33 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant AuthService
-    participant UserService
-    participant DB as Database
+    participant GW as API Gateway
+    participant AUTH as Auth Service
+    participant USER as User Service
+    participant AUTH_DB as Auth DB
+    participant USER_DB as Users DB
 
-    Клиент->>APIGateway: POST /api/register
-    Note over Клиент,APIGateway: {email, username, password}
+    Клиент->>GW: POST /api/auth/register
+    Note over Клиент,GW: {email, username, password, profile_data}
     
-    APIGateway->>APIGateway: Валидация запроса
-    APIGateway->>AuthService: CreateUser()
+    GW->>GW: Базовая валидация запроса
+    GW->>AUTH: RegisterUser(registration_data)
     
-    AuthService->>DB: Проверка уникальности
-    DB-->>AuthService: Результат проверки
+    AUTH->>AUTH_DB: Проверка уникальности email/username
+    AUTH_DB-->>AUTH: Результат проверки
     
-    AuthService->>AuthService: Хеширование пароля
-    AuthService->>UserService: CreateProfile()
+    AUTH->>AUTH: Хеширование пароля (bcrypt)
+    AUTH->>AUTH_DB: Сохранение учетных данных
+    AUTH_DB-->>AUTH: user_id
     
-    UserService->>DB: Создание профиля
-    DB-->>UserService: Подтверждение
+    AUTH->>USER: CreateUserProfile(user_id, profile_data)
+    USER->>USER_DB: Создание профиля пользователя
+    USER_DB-->>USER: Подтверждение создания
     
-    UserService-->>AuthService: OK
-    AuthService->>AuthService: Генерация JWT
-    AuthService-->>APIGateway: Токен + данные пользователя
-    APIGateway-->>Клиент: HTTP 201 + JWT токен
+    USER-->>AUTH: ProfileCreated
+    AUTH->>AUTH: Генерация JWT токена
+    AUTH-->>GW: {user_id, token, user_profile}
+    GW-->>Клиент: HTTP 201 + JWT + данные пользователя
 ```
 ### Цель
 Создание новой учетной записи пользователя в системе с полной валидацией данных и автоматической аутентификацией после успешной регистрации.
@@ -446,27 +437,30 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant AuthService
-    participant DB as Database
+    participant GW as API Gateway
+    participant AUTH as Auth Service
+    participant USER as User Service
+    participant AUTH_DB as Auth DB
 
-    Клиент->>APIGateway: POST /api/login
-    Note over Клиент,APIGateway: {username, password}
+    Клиент->>GW: POST /api/auth/login
+    Note over Клиент,GW: {email, password}
     
-    APIGateway->>AuthService: Authenticate()
+    GW->>AUTH: AuthenticateUser(email, password)
     
-    AuthService->>DB: Поиск пользователя по username
-    DB-->>AuthService: Данные пользователя + password_hash
+    AUTH->>AUTH_DB: Поиск пользователя по email
+    AUTH_DB-->>AUTH: Данные аутентификации
     
-    AuthService->>AuthService: Проверка пароля (bcrypt)
-    alt Парверка успешна
-        AuthService->>DB: Обновление last_login
-        AuthService->>AuthService: Генерация JWT токена
-        AuthService-->>APIGateway: Успешная аутентификация
-        APIGateway-->>Клиент: HTTP 200 + JWT токен
+    AUTH->>AUTH: Проверка пароля (bcrypt)
+    alt Успешная аутентификация
+        AUTH->>AUTH_DB: Обновление last_login
+        AUTH->>USER: GetUserProfile(user_id)
+        USER-->>AUTH: Данные профиля
+        AUTH->>AUTH: Генерация JWT токена
+        AUTH-->>GW: {token, user_profile}
+        GW-->>Клиент: HTTP 200 + JWT + профиль
     else Ошибка аутентификации
-        AuthService-->>APIGateway: Ошибка аутентификации
-        APIGateway-->>Клиент: HTTP 401 Unauthorized
+        AUTH-->>GW: AuthenticationFailed
+        GW-->>Клиент: HTTP 401 Unauthorized
     end
 ```
 ### Цель
@@ -495,33 +489,34 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant MovieService
-    participant Cache as Redis Cache
-    participant LocalDB as Local Database
+    participant GW as API Gateway
+    participant MOVIE as Movie Service
+    participant CACHE as Redis Cache
+    participant MOVIE_DB as Movies DB
     participant TMDB as TMDB API
 
-    Клиент->>APIGateway: GET /api/movies?query=inception
-    APIGateway->>MovieService: SearchMovies(query)
+    Клиент->>GW: GET /api/movies/search?query=inception&genre=sci-fi
+    GW->>MOVIE: SearchMovies(search_params)
     
-    MovieService->>Cache: Поиск в кэше по ключу
+    MOVIE->>CACHE: Поиск по хешу параметров поиска
     alt Найдено в кэше
-        Cache-->>MovieService: Данные из кэша
+        CACHE-->>MOVIE: Результаты из кэша
     else Не найдено в кэше
-        MovieService->>LocalDB: Поиск в локальной БД
-        LocalDB-->>MovieService: Результаты из БД
+        MOVIE->>MOVIE_DB: Расширенный поиск по БД
+        MOVIE_DB-->>MOVIE: Результаты из локальной БД
         
         alt Недостаточно результатов
-            MovieService->>TMDB: Запрос к внешнему API
-            TMDB-->>MovieService: Данные фильмов
-            MovieService->>LocalDB: Сохранение в БД
-            MovieService->>Cache: Кэширование на 60 мин
+            MOVIE->>TMDB: SearchExternalAPI(search_params)
+            TMDB-->>MOVIE: Данные от TMDB
+            MOVIE->>MOVIE_DB: Сохранение новых фильмов
+            MOVIE->>CACHE: Кэширование результатов (60 мин)
         end
     end
     
-    MovieService->>MovieService: Форматирование ответа
-    MovieService-->>APIGateway: Список фильмов
-    APIGateway-->>Клиент: HTTP 200 + результаты поиска
+    MOVIE->>MOVIE: Обогащение данных (постеры, трейлеры)
+    MOVIE-->>GW: Структурированные результаты поиска
+    GW-->>Клиент: HTTP 200 + фильмы с метаданными
+
 ```
 ### Цель
 Эффективный поиск фильмов по различным критериям с использованием многоуровневого кэширования для максимальной производительности.
@@ -543,35 +538,36 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant RatingService
-    participant MovieService
-    participant RecService as Recommendation Service
-    participant NotifService as Notification Service
-    participant SocialService
-    participant DB as Database
+    participant GW as API Gateway
+    participant MOVIE as Movie Service
+    participant SOCIAL as Social Service
+    participant REC as Recommendation Service
+    participant NOTIFY as Notification Service
+    participant MOVIE_DB as Movies DB
+    participant SOCIAL_DB as Social DB
 
-    Клиент->>APIGateway: POST /api/ratings
-    Note over Клиент,APIGateway: {movie_id, rating, comment}
+    Клиент->>GW: POST /api/movies/{id}/rating
+    Note over Клиент,GW: {rating: 5, review: "Отличный фильм"}
     
-    APIGateway->>APIGateway: Валидация JWT (извлечение user_id)
-    APIGateway->>RatingService: AddRating(user_id, movie_id, rating)
+    GW->>GW: Извлечение user_id из JWT
+    GW->>MOVIE: AddRating(user_id, movie_id, rating, review)
     
-    RatingService->>DB: Сохранение оценки в таблицу ratings
-    DB-->>RatingService: Подтверждение сохранения
+    MOVIE->>MOVIE_DB: Сохранение оценки в ratings
+    MOVIE_DB-->>MOVIE: Подтверждение
     
-    RatingService->>MovieService: UpdateMovieStats(movie_id)
-    MovieService->>DB: Обновление среднего рейтинга фильма
+    MOVIE->>MOVIE_DB: Обновление avg_rating фильма
     
-    par Асинхронные операции
-        RatingService->>RecService: InvalidateCache(user_id)
-        RatingService->>SocialService: GetUserFriends(user_id)
-        SocialService-->>RatingService: Список друзей
-        RatingService->>NotifService: NotifyFriends(friends, rating)
+    par Асинхронные события
+        MOVIE->>REC: RatingAdded(user_id, movie_id, rating)
+        MOVIE->>SOCIAL: GetUserFriends(user_id)
+        SOCIAL->>SOCIAL_DB: Запрос списка друзей
+        SOCIAL_DB-->>SOCIAL: friends_list
+        SOCIAL-->>MOVIE: Список ID друзей
+        MOVIE->>NOTIFY: NotifyFriendsRating(friends, user_id, movie_id, rating)
     end
     
-    RatingService-->>APIGateway: Подтверждение успешного добавления
-    APIGateway-->>Клиент: HTTP 201 Created
+    MOVIE-->>GW: RatingCreated
+    GW-->>Клиент: HTTP 201 + обновленный рейтинг фильма
 ```
 ### Цель
 Сохранение пользовательской оценки фильма с последующим обновлением всех зависимых систем и уведомлением заинтересованных сторон.
@@ -600,46 +596,43 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant RecService as Recommendation Service
-    participant Cache as Redis Cache
-    participant RatingService
-    participant SocialService
-    participant MovieService
-    participant DB as Database
+    participant GW as API Gateway
+    participant REC as Recommendation Service
+    participant MOVIE as Movie Service
+    participant SOCIAL as Social Service
+    participant USER as User Service
+    participant CACHE as Redis Cache
+    participant REC_DB as ML Models DB
 
-    Клиент->>APIGateway: GET /api/recommendations
-    APIGateway->>APIGateway: Валидация JWT (извлечение user_id)
-    APIGateway->>RecService: GetRecommendations(user_id)
+    Клиент->>GW: GET /api/recommendations
+    GW->>GW: Извлечение user_id из JWT
+    GW->>REC: GetPersonalizedRecommendations(user_id)
     
-    RecService->>Cache: Проверка кэша по user_id
+    REC->>CACHE: Проверка кэша рекомендаций
     alt Найдено в кэше
-        Cache-->>RecService: Рекомендации из кэша
+        CACHE-->>REC: Рекомендации из кэша
     else Не найдено в кэше
-        RecService->>RatingService: GetUserRatings(user_id)
-        RatingService->>DB: Запрос истории оценок пользователя
-        DB-->>RatingService: Список оценок
+        REC->>MOVIE: GetUserRatingHistory(user_id)
+        MOVIE-->>REC: История оценок пользователя
         
-        RecService->>SocialService: GetFriends(user_id)
-        SocialService->>DB: Запрос списка друзей
-        DB-->>SocialService: ID друзей пользователя
+        REC->>SOCIAL: GetUserFriends(user_id)
+        SOCIAL-->>REC: Список друзей и их активности
         
-        par Получение данных
-            RatingService-->>RecService: История оценок
-            SocialService-->>RecService: Список друзей
-        end
+        REC->>USER: GetUserPreferences(user_id)
+        USER-->>REC: Предпочтения и демография
         
-        RecService->>RecService: Алгоритм рекомендаций
-        Note over RecService: Коллаборативная фильтрация<br/>+ оценки друзей
+        REC->>REC_DB: Загрузка ML моделей
+        REC->>REC: Генерация рекомендаций
+        Note over REC: Коллаборативная фильтрация +<br/>контентные рекомендации +<br/>социальные сигналы
         
-        RecService->>MovieService: GetMoviesDetails(recommended_ids)
-        MovieService-->>RecService: Информация о фильмах
+        REC->>MOVIE: GetMoviesDetails(recommended_ids)
+        MOVIE-->>REC: Полные данные фильмов
         
-        RecService->>Cache: Кэширование на 30 минут
+        REC->>CACHE: Кэширование на 30 минут
     end
     
-    RecService-->>APIGateway: Персонализированные рекомендации
-    APIGateway-->>Клиент: HTTP 200 + список рекомендаций
+    REC-->>GW: Персонализированные рекомендации
+    GW-->>Клиент: HTTP 200 + список рекомендаций
 ```
 ### Цель
 Генерация персонализированных рекомендаций фильмов на основе комплексного анализа поведения пользователя и его социального окружения.
@@ -662,40 +655,37 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Клиент
-    participant APIGateway
-    participant SocialService
-    participant UserService
-    participant NotifService as Notification Service
-    participant DB as Database
-    participant WS as WebSocket
+    participant GW as API Gateway
+    participant SOCIAL as Social Service
+    participant USER as User Service
+    participant NOTIFY as Notification Service
+    participant SOCIAL_DB as Social DB
 
-    Клиент->>APIGateway: POST /api/friends/request
-    Note over Клиент,APIGateway: {target_username}
+    Клиент->>GW: POST /api/social/friends/request
+    Note over Клиент,GW: {target_user_id}
     
-    APIGateway->>APIGateway: Валидация JWT (извлечение user_id)
-    APIGateway->>SocialService: SendFriendRequest(user_id, target_username)
+    GW->>GW: Извлечение user_id из JWT
+    GW->>SOCIAL: SendFriendRequest(user_id, target_user_id)
     
-    SocialService->>UserService: GetUserByUsername(target_username)
-    UserService->>DB: Поиск пользователя по username
-    DB-->>UserService: Данные целевого пользователя
-    UserService-->>SocialService: target_user_id
+    SOCIAL->>USER: ValidateUserExists(target_user_id)
+    USER-->>SOCIAL: User validation result
     
-    SocialService->>DB: Проверка существующих запросов
-    DB-->>SocialService: Результат проверки
+    SOCIAL->>SOCIAL_DB: Проверка существующих запросов/дружбы
+    SOCIAL_DB-->>SOCIAL: Текущий статус отношений
     
-    alt Запрос уже существует
-        SocialService-->>APIGateway: Ошибка - запрос уже отправлен
-        APIGateway-->>Клиент: HTTP 409 Conflict
-    else Новый запрос
-        SocialService->>DB: Создание записи friend_requests
-        DB-->>SocialService: Подтверждение создания
+    alt Можно отправить запрос
+        SOCIAL->>SOCIAL_DB: Создание friend_request
+        SOCIAL_DB-->>SOCIAL: request_id
         
-        SocialService->>NotifService: NotifyFriendRequest(target_user_id, user_id)
-        NotifService->>WS: Отправка уведомления
-        Note over WS: WebSocket /users/{target_user_id}/notifications
+        SOCIAL->>NOTIFY: CreateFriendRequestNotification(target_user_id, user_id)
+        NOTIFY->>NOTIFY: Отправка in-app уведомления
+        Note over NOTIFY: WebSocket /users/{target_user_id}/notifications
         
-        SocialService-->>APIGateway: Успешное создание запроса
-        APIGateway-->>Клиент: HTTP 201 Created
+        SOCIAL-->>GW: FriendRequestSent
+        GW-->>Клиент: HTTP 201 + статус запроса
+    else Конфликт
+        SOCIAL-->>GW: FriendRequestConflict
+        GW-->>Клиент: HTTP 409 + описание конфликта
     end
 ```
 ### Цель
