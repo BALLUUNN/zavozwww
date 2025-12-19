@@ -1,0 +1,12 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+logging:
+  level: DEBUG
+  format: TEXT
+email:
+  smtp_host: localhost
+  smtp_port: 1025
+  username: ""
+  password: ""
+  from: boldakovvova06@gmail.com

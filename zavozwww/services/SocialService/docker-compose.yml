@@ -1,0 +1,66 @@
+services:
+  social_db:
+    image: postgres:15-alpine
+    container_name: social_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: social_user
+      POSTGRES_PASSWORD: social_password
+      POSTGRES_DB: social_db
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - social_postgres_data:/var/lib/postgresql/data
+    networks:
+      - social-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-social_user} -d ${POSTGRES_DB:-social_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  social_service:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: social_service
+    restart: unless-stopped
+    depends_on:
+      social_db:
+        condition: service_healthy
+    environment:
+      APP_CONFIG_PATH: /app/internal/config/config.yaml
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      LOG_FORMAT: ${LOG_FORMAT:-TEXT}
+      JWT_SECRET: ${JWT_SECRET}
+      POSTGRES_HOST: social_db
+      POSTGRES_PORT: 5432       
+      POSTGRES_USER: social_user
+      POSTGRES_PASSWORD: social_password
+      POSTGRES_DB: social_db
+      POSTGRES_SSLMODE: disable
+    ports:
+      - "${SERVICE_PORT:-8082}:8080"
+    volumes:
+      - ./internal/config/config.yaml:/app/internal/config/config.yaml:ro
+    networks:
+      - social-network
+
+  social_adminer:
+    image: adminer
+    restart: always
+    container_name: social_adminer
+    ports:
+      - "8083:8080"
+    depends_on:
+      - social_db
+    networks:
+      - social-network
+
+networks:
+  social-network:
+    external: true
+    name: filmbuddy-network
+
+volumes:
+  social_postgres_data:
