@@ -831,4 +831,3 @@ graph TB
     style MOVIE fill:#f3e5f5
     style CORE fill:#e8f5e8
 ```
-

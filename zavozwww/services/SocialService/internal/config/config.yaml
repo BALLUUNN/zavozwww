@@ -1,0 +1,10 @@
+logger:
+  level: "DEBUG"
+  format: "TEXT"
+  output: "stdout"
+server:
+  host: "0.0.0.0"
+  port: "8080"
+services:
+  user_service_url: "http://auth_service:8080"
+  movie_service_url: "http://movie_service:8080"
